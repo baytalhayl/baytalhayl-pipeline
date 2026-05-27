@@ -24,16 +24,12 @@ jobs:
             libgirepository1.0-dev \
             python3-cairo \
             python3-pil \
+            python3-requests \
             fonts-sil-scheherazade
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
 
       - name: Install Python dependencies
         run: |
-          pip install requests Pillow pycairo --no-build-isolation
+          python3 -m pip install --break-system-packages Pillow pycairo requests
 
       - name: Run post script
         env:
@@ -41,5 +37,4 @@ jobs:
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
           GITHUB_TOKEN:           ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPO:            ${{ github.repository }}
-          PYTHONPATH:             /usr/lib/python3/dist-packages
-        run: python post.py
+        run: python3 post.py
