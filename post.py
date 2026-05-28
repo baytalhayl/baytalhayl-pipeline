@@ -57,46 +57,32 @@ def save_queue(queue):
 def already_posted(queue, poem_id):
     return any(p["id"] == poem_id for p in queue)
 
-# ── Step 2: Fetch random poem from Qafiyah API ────────────────────────────────
+# ── Step 2: Pick random poem from local dataset ───────────────────────────────
 def fetch_poem():
-    """
-    Qafiyah API: https://qafiyah.com
-    Tries to get a random poem with 4-6 verses.
-    Falls back to picking a random poem and slicing 4-6 lines.
-    """
-    for attempt in range(10):
-        try:
-            # Get a random poem ID (85,342 poems available)
-            poem_id = random.randint(1, 85342)
-            url = f"https://qafiyah.com/api/poems/{poem_id}"
-            r = requests.get(url, timeout=10)
-            if r.status_code != 200:
-                continue
-            data = r.json()
+    with open("poems.json", "r", encoding="utf-8") as f:
+        poems = json.load(f)
 
-            # Extract verses — API returns list of verse objects
-            verses = data.get("verses", [])
-            poet   = data.get("poet", {}).get("name", "مجهول")
+    random.shuffle(poems)
 
-            if len(verses) < 4:
-                continue
+    for poem in poems:
+        poem_id = f"{poem['poet']}_{poem['verses'][0][:10]}"
+        verses  = poem["verses"]
+        poet    = poem["poet"]
 
-            # Pick a random window of 4-6 consecutive lines
-            n = random.randint(4, min(6, len(verses)))
-            start = random.randint(0, len(verses) - n)
-            lines = [v["text"] for v in verses[start:start + n]]
-
-            return {
-                "id": str(poem_id),
-                "poet": poet,
-                "lines": lines,
-            }
-
-        except Exception as e:
-            print(f"Attempt {attempt+1} failed: {e}")
+        if len(verses) < 4:
             continue
 
-    raise RuntimeError("Could not fetch a valid poem after 10 attempts.")
+        n     = random.randint(4, min(6, len(verses)))
+        start = random.randint(0, len(verses) - n)
+        lines = verses[start:start + n]
+
+        return {
+            "id":    poem_id,
+            "poet":  poet,
+            "lines": lines,
+        }
+
+    raise RuntimeError("No valid poems found in dataset.")
 
 # ── Step 3: Generate image ────────────────────────────────────────────────────
 def generate_image(lines, poet):
