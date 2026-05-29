@@ -179,6 +179,7 @@ def post_to_instagram(image_url, caption):
         "creation_id":  container_id,
         "access_token": INSTAGRAM_TOKEN,
     })
+    print(f"Publish response: {r.status_code} {r.text}")
     r.raise_for_status()
     post_id = r.json()["id"]
     print(f"Posted to Instagram: {post_id}")
