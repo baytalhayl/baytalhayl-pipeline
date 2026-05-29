@@ -222,7 +222,8 @@ def main():
 
     # Upload to GitHub
     image_url = upload_to_github()
-
+    import time
+    time.sleep(10)
     # Build caption — poem lines + poet name
     caption = "\n".join(poem["lines"]) + f"\n\n— {poem['poet']}"
 
