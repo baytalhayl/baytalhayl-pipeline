@@ -172,6 +172,7 @@ def post_to_instagram(image_url, caption):
     })
     print(f"Instagram response: {r.status_code} {r.text}")
     r.raise_for_status()
+    container_id = r.json()["id"]
 
     # Publish
     r = requests.post(f"{base}/media_publish", data={
