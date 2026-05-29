@@ -170,9 +170,8 @@ def post_to_instagram(image_url, caption):
         "caption":   caption,
         "access_token": INSTAGRAM_TOKEN,
     })
+    print(f"Instagram response: {r.status_code} {r.text}")
     r.raise_for_status()
-    container_id = r.json()["id"]
-    print(f"Container created: {container_id}")
 
     # Publish
     r = requests.post(f"{base}/media_publish", data={
