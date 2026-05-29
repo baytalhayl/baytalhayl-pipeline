@@ -38,3 +38,15 @@ jobs:
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
           GITHUB_REPO:            ${{ github.repository }}
         run: python3 post.py
+
+        - name: Test aldiwan scraper
+        run: |
+          python3 -c "
+          import requests
+          from bs4 import BeautifulSoup
+          r = requests.get('https://www.aldiwan.net/poem1.html', timeout=10)
+          print('status:', r.status_code)
+          soup = BeautifulSoup(r.text, 'html.parser')
+          print('title:', soup.title.text if soup.title else 'no title')
+          print('html snippet:', r.text[1000:2000])
+          "
