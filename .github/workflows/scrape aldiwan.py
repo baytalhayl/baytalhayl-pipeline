@@ -1,50 +1,17 @@
-import requests
-from bs4 import BeautifulSoup
+"""
+Downloads the Ashaar dataset from Hugging Face and saves a curated
+JSON file of poems with 4+ verses to the repo.
+"""
 import json
-import random
-import time
 import base64
 import os
+import requests
+import random
 
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GITHUB_REPO  = os.environ["GITHUB_REPO"]
 OUTPUT_FILE  = "aldiwan_poems.json"
-TARGET       = 500  # number of poems to collect
-HEADERS      = {"User-Agent": "Mozilla/5.0 (compatible; bot)"}
-
-def scrape_poem(poem_id):
-    url = f"https://www.aldiwan.net/poem{poem_id}.html"
-    try:
-        r = requests.get(url, timeout=10, headers=HEADERS)
-        if r.status_code != 200:
-            return None
-
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        # Poet name — h2 with class containing "text-center"
-        poet_tag = soup.find("h2", class_=lambda c: c and "text-center" in c)
-        if not poet_tag:
-            return None
-        # Remove the verified badge span text
-        for span in poet_tag.find_all("span"):
-            span.decompose()
-        poet = poet_tag.get_text(strip=True)
-        if not poet:
-            return None
-
-        # Verses — aldiwan uses h3 tags with height:28px style
-        verse_tags = soup.find_all("h3", style=lambda s: s and "28px" in s)
-        verses = [v.get_text(strip=True).replace("\xa0", " ").strip() for v in verse_tags]
-        verses = [v for v in verses if v and len(v) > 5]
-
-        if len(verses) < 4:
-            return None
-
-        return {"poet": poet, "verses": verses}
-
-    except Exception as e:
-        print(f"  Error scraping poem {poem_id}: {e}")
-        return None
+TARGET       = 5000
 
 def commit_to_github(poems):
     content  = base64.b64encode(json.dumps(poems, ensure_ascii=False, indent=2).encode()).decode()
@@ -54,7 +21,7 @@ def commit_to_github(poems):
     r   = requests.get(api_url, headers=headers)
     sha = r.json().get("sha") if r.status_code == 200 else None
 
-    payload = {"message": f"scrape: {len(poems)} poems from aldiwan", "content": content}
+    payload = {"message": f"scrape: {len(poems)} poems from Ashaar dataset", "content": content}
     if sha:
         payload["sha"] = sha
 
@@ -63,32 +30,36 @@ def commit_to_github(poems):
     print(f"Committed {len(poems)} poems to {OUTPUT_FILE}")
 
 def main():
-    poems   = []
-    ids     = random.sample(range(1, 10000), min(TARGET * 3, 9000))
-    checked = 0
+    from datasets import load_dataset
+    print("Downloading Ashaar dataset...")
+    ds = load_dataset("arbml/ashaar", split="train", trust_remote_code=True)
+    print(f"Dataset loaded: {len(ds)} poems")
+    print(f"Columns: {ds.column_names}")
 
-    for poem_id in ids:
+    poems = []
+    indices = list(range(len(ds)))
+    random.shuffle(indices)
+
+    for i in indices:
         if len(poems) >= TARGET:
             break
+        item   = ds[i]
+        verses = item.get("poem verses", [])
+        poet   = item.get("poet name", "مجهول")
 
-        checked += 1
-        print(f"Checking poem {poem_id} ({len(poems)}/{TARGET} collected)...")
-        poem = scrape_poem(poem_id)
+        if not isinstance(verses, list) or len(verses) < 4:
+            continue
+        if not poet or not isinstance(poet, str):
+            continue
 
-        if poem:
-            poems.append(poem)
-            print(f"  ✓ {poem['poet']} — {len(poem['verses'])} verses")
+        poems.append({
+            "poet":   poet.strip(),
+            "verses": [v.strip() for v in verses if v and v.strip()]
+        })
 
-        # Be polite — don't hammer the server
-        time.sleep(0.5)
-
-        # Save progress every 50 poems
-        if len(poems) % 50 == 0 and len(poems) > 0:
-            print(f"Progress save: {len(poems)} poems collected")
-            commit_to_github(poems)
-
+    print(f"Collected {len(poems)} valid poems.")
     commit_to_github(poems)
-    print(f"Done! Scraped {len(poems)} poems from {checked} attempts.")
+    print("Done!")
 
 if __name__ == "__main__":
     main()
