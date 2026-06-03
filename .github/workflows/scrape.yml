@@ -13,11 +13,13 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y python3-requests
-          python3 -m pip install --break-system-packages requests beautifulsoup4
+        run: pip install datasets requests
 
       - name: Run scraper
         env:
