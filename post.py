@@ -161,6 +161,10 @@ def upload_to_github():
     return raw_url
 
 # ── Step 5: Post to Instagram ─────────────────────────────────────────────────
+ queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
+    save_queue(queue)
+    commit_queue(queue)
+
 def post_to_instagram(image_url, caption):
     base = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{INSTAGRAM_USER_ID}"
 
@@ -231,9 +235,7 @@ def main():
     post_to_instagram(image_url, caption)
 
     # Update queue
-    queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
-    save_queue(queue)
-    commit_queue(queue)
+   
 
     print("Done!")
 
