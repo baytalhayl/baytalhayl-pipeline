@@ -32,6 +32,13 @@ GREEN = (0.176, 0.416, 0.176)
 def set_color(ctx, c, a=1.0):
     ctx.set_source_rgba(c[0], c[1], c[2], a)
 
+def get_line_count(ctx, text, font_desc, width):
+    layout = PangoCairo.create_layout(ctx)
+    layout.set_text(text, -1)
+    layout.set_font_description(Pango.FontDescription(font_desc))
+    layout.set_width(width * Pango.SCALE)
+    return layout.get_line_count()
+
 def get_text_height(ctx, text, font_desc, width):
     layout = PangoCairo.create_layout(ctx)
     layout.set_text(text, -1)
@@ -80,22 +87,16 @@ def fetch_poem():
         if len(verses) < 4:
             continue
 
-        # Pick even number of lines (2, 4, or 6) for couplet layout
         max_lines = min(6, len(verses))
         if max_lines % 2 != 0:
             max_lines -= 1
-        n = random.choice([4, 6] if max_lines >= 6 else [4])
+        n = 4 if max_lines < 6 else random.choice([4, 6])
         start = random.randint(0, len(verses) - n)
-        # Make sure start is even so couplets align correctly
         if start % 2 != 0:
             start = max(0, start - 1)
         lines = verses[start:start + n]
 
-        return {
-            "id":    poem_id,
-            "poet":  poet,
-            "lines": lines,
-        }
+        return {"id": poem_id, "poet": poet, "lines": lines}
 
     raise RuntimeError("No valid poems found in dataset.")
 
@@ -114,23 +115,24 @@ def generate_image(lines, poet):
     ctx.set_source_surface(bg, 0, 0)
     ctx.paint()
 
-    # Pair lines into couplets
     couplets = [(lines[i], lines[i+1]) for i in range(0, len(lines)-1, 2)]
     n_couplets = len(couplets)
 
-    MARGIN = 100
+    MARGIN = 80
     half_w = (SIZE - 2 * MARGIN) // 2
     mid_x  = SIZE // 2
 
-    font_size = 38 if n_couplets >= 3 else 44
-    font_desc = f"Scheherazade {font_size}"
-    GAP = 24
+    # Auto-fit font size so no hemistich wraps
+    font_size = 44
+    while font_size >= 24:
+        font_desc = f"Scheherazade {font_size}"
+        if all(get_line_count(ctx, h, font_desc, half_w) == 1 for pair in couplets for h in pair):
+            break
+        font_size -= 2
 
-    # Uniform row height — max across all hemistichs
-    row_height = max(
-        get_text_height(ctx, h, font_desc, half_w)
-        for pair in couplets for h in pair
-    )
+    font_desc = f"Scheherazade {font_size}"
+    GAP = 32
+    row_height = max(get_text_height(ctx, h, font_desc, half_w) for pair in couplets for h in pair)
 
     content_top    = 148
     content_bottom = SIZE - 148
@@ -145,13 +147,15 @@ def generate_image(lines, poet):
 
     # Symmetrical divider
     div_y = start_y + n_couplets * (row_height + GAP) + 10
+    LINE_START = 200
+    LINE_END   = 390
     set_color(ctx, WHITE, 0.6)
     ctx.set_line_width(1)
-    ctx.move_to(200, div_y); ctx.line_to(390, div_y); ctx.stroke()
-    ctx.move_to(690, div_y); ctx.line_to(880, div_y); ctx.stroke()
+    ctx.move_to(LINE_START, div_y); ctx.line_to(LINE_END, div_y); ctx.stroke()
+    ctx.move_to(SIZE - LINE_END, div_y); ctx.line_to(SIZE - LINE_START, div_y); ctx.stroke()
     set_color(ctx, GREEN, 0.8)
-    ctx.move_to(200, div_y - 3); ctx.line_to(390, div_y - 3); ctx.stroke()
-    ctx.move_to(690, div_y - 3); ctx.line_to(880, div_y - 3); ctx.stroke()
+    ctx.move_to(LINE_START, div_y - 3); ctx.line_to(LINE_END, div_y - 3); ctx.stroke()
+    ctx.move_to(SIZE - LINE_END, div_y - 3); ctx.line_to(SIZE - LINE_START, div_y - 3); ctx.stroke()
 
     # Poet name
     layout = PangoCairo.create_layout(ctx)
@@ -250,7 +254,6 @@ def main():
 
     caption = "\n".join(poem["lines"]) + f"\n\n— {poem['poet']}"
 
-    # Mark as posted before posting so duplicates never happen
     queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
     save_queue(queue)
     commit_queue(queue)
