@@ -22,8 +22,8 @@ GRAPH_API_VERSION  = "v25.0"
 
 QUEUE_FILE    = "queue.json"
 TEMPLATE_FILE = "template.png"
-OUTPUT_FILE   = "output.png"
-
+from datetime import datetime
+OUTPUT_FILE = f"output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
 SIZE  = 1080
 WHITE = (1, 1, 1)
 IVORY = (0.961, 0.925, 0.843)
