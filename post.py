@@ -235,7 +235,13 @@ def main():
     post_to_instagram(image_url, caption)
 
     # Update queue
-   
+   # Update queue before posting so we never repeat even if posting fails
+    queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
+    save_queue(queue)
+    commit_queue(queue)
+
+    # Post to Instagram
+    post_to_instagram(image_url, caption)
 
     print("Done!")
 
