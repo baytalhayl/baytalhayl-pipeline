@@ -8,7 +8,7 @@ gi.require_version('Pango', '1.0')
 gi.require_version('PangoCairo', '1.0')
 from gi.repository import Pango, PangoCairo
 from PIL import Image
-from datetime import date
+from datetime import date, datetime
 import io
 import base64
 import time
@@ -22,8 +22,7 @@ GRAPH_API_VERSION  = "v25.0"
 
 QUEUE_FILE    = "queue.json"
 TEMPLATE_FILE = "template.png"
-from datetime import datetime
-OUTPUT_FILE = f"output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+
 SIZE  = 1080
 WHITE = (1, 1, 1)
 IVORY = (0.961, 0.925, 0.843)
@@ -33,15 +32,23 @@ GREEN = (0.176, 0.416, 0.176)
 def set_color(ctx, c, a=1.0):
     ctx.set_source_rgba(c[0], c[1], c[2], a)
 
-def draw_centered_text(ctx, text, font_desc, y, color=WHITE):
+def get_text_height(ctx, text, font_desc, width):
+    layout = PangoCairo.create_layout(ctx)
+    layout.set_text(text, -1)
+    layout.set_font_description(Pango.FontDescription(font_desc))
+    layout.set_width(width * Pango.SCALE)
+    _, lh = layout.get_pixel_size()
+    return lh
+
+def draw_hemistich(ctx, text, font_desc, y, x_start, width, row_height):
     layout = PangoCairo.create_layout(ctx)
     layout.set_text(text, -1)
     layout.set_font_description(Pango.FontDescription(font_desc))
     layout.set_alignment(Pango.Alignment.CENTER)
-    layout.set_width((SIZE - 160) * Pango.SCALE)
+    layout.set_width(width * Pango.SCALE)
     _, lh = layout.get_pixel_size()
-    set_color(ctx, color)
-    ctx.move_to(80, y - lh // 2)
+    set_color(ctx, WHITE)
+    ctx.move_to(x_start, y + (row_height - lh) // 2)
     PangoCairo.show_layout(ctx, layout)
 
 # ── Step 1: Load queue ────────────────────────────────────────────────────────
@@ -73,8 +80,15 @@ def fetch_poem():
         if len(verses) < 4:
             continue
 
-        n     = random.randint(4, min(6, len(verses)))
+        # Pick even number of lines (2, 4, or 6) for couplet layout
+        max_lines = min(6, len(verses))
+        if max_lines % 2 != 0:
+            max_lines -= 1
+        n = random.choice([4, 6] if max_lines >= 6 else [4])
         start = random.randint(0, len(verses) - n)
+        # Make sure start is even so couplets align correctly
+        if start % 2 != 0:
+            start = max(0, start - 1)
         lines = verses[start:start + n]
 
         return {
@@ -87,6 +101,8 @@ def fetch_poem():
 
 # ── Step 3: Generate image ────────────────────────────────────────────────────
 def generate_image(lines, poet):
+    output_file = f"output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+
     template = Image.open(TEMPLATE_FILE).convert("RGBA")
     buf = io.BytesIO()
     template.save(buf, format="PNG")
@@ -98,49 +114,66 @@ def generate_image(lines, poet):
     ctx.set_source_surface(bg, 0, 0)
     ctx.paint()
 
-    n = len(lines)
-    if n <= 4:
-        font_size = 74
-    elif n == 5:
-        font_size = 66
-    else:
-        font_size = 58
+    # Pair lines into couplets
+    couplets = [(lines[i], lines[i+1]) for i in range(0, len(lines)-1, 2)]
+    n_couplets = len(couplets)
 
-    line_spacing   = font_size + 28
+    MARGIN = 100
+    half_w = (SIZE - 2 * MARGIN) // 2
+    mid_x  = SIZE // 2
+
+    font_size = 38 if n_couplets >= 3 else 44
+    font_desc = f"Scheherazade {font_size}"
+    GAP = 24
+
+    # Uniform row height — max across all hemistichs
+    row_height = max(
+        get_text_height(ctx, h, font_desc, half_w)
+        for pair in couplets for h in pair
+    )
+
     content_top    = 148
     content_bottom = SIZE - 148
     content_height = content_bottom - content_top
-    total_h        = n * line_spacing + 70 + 55
-    start_y        = content_top + (content_height - total_h) // 2 + font_size // 2
+    total_h        = n_couplets * (row_height + GAP) - GAP
+    start_y        = content_top + (content_height - total_h) // 2
 
-    for i, line in enumerate(lines):
-        draw_centered_text(ctx, line, f"Scheherazade {font_size}", start_y + i * line_spacing)
+    for i, (right_h, left_h) in enumerate(couplets):
+        y = start_y + i * (row_height + GAP)
+        draw_hemistich(ctx, right_h, font_desc, y, MARGIN, half_w, row_height)
+        draw_hemistich(ctx, left_h, font_desc, y, mid_x, half_w, row_height)
 
-    div_y = start_y + n * line_spacing + 18
+    # Symmetrical divider
+    div_y = start_y + n_couplets * (row_height + GAP) + 10
     set_color(ctx, WHITE, 0.6)
     ctx.set_line_width(1)
-    ctx.move_to(280, div_y); ctx.line_to(490, div_y); ctx.stroke()
+    ctx.move_to(200, div_y); ctx.line_to(390, div_y); ctx.stroke()
+    ctx.move_to(690, div_y); ctx.line_to(880, div_y); ctx.stroke()
     set_color(ctx, GREEN, 0.8)
-    ctx.move_to(280, div_y - 3); ctx.line_to(490, div_y - 3); ctx.stroke()
-    set_color(ctx, WHITE)
-    ctx.move_to(SIZE//2, div_y - 10)
-    ctx.line_to(SIZE//2 + 10, div_y)
-    ctx.line_to(SIZE//2, div_y + 10)
-    ctx.line_to(SIZE//2 - 10, div_y)
-    ctx.close_path(); ctx.fill()
+    ctx.move_to(200, div_y - 3); ctx.line_to(390, div_y - 3); ctx.stroke()
+    ctx.move_to(690, div_y - 3); ctx.line_to(880, div_y - 3); ctx.stroke()
 
-    draw_centered_text(ctx, f"— {poet}", "Scheherazade 36", div_y + 46, color=IVORY)
+    # Poet name
+    layout = PangoCairo.create_layout(ctx)
+    layout.set_text(f"— {poet}", -1)
+    layout.set_font_description(Pango.FontDescription("Scheherazade 36"))
+    layout.set_alignment(Pango.Alignment.CENTER)
+    layout.set_width(SIZE * Pango.SCALE)
+    _, lh = layout.get_pixel_size()
+    set_color(ctx, IVORY)
+    ctx.move_to(0, div_y + 40 - lh // 2)
+    PangoCairo.show_layout(ctx, layout)
 
-    surface.write_to_png(OUTPUT_FILE)
-    print(f"Image generated: {OUTPUT_FILE}")
+    surface.write_to_png(output_file)
+    print(f"Image generated: {output_file}")
+    return output_file
 
 # ── Step 4: Upload image to GitHub ────────────────────────────────────────────
-def upload_to_github():
-    with open(OUTPUT_FILE, "rb") as f:
+def upload_to_github(output_file):
+    with open(output_file, "rb") as f:
         content = base64.b64encode(f.read()).decode()
 
-    path    = OUTPUT_FILE
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{output_file}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 
     r = requests.get(api_url, headers=headers)
@@ -153,7 +186,7 @@ def upload_to_github():
     r = requests.put(api_url, headers=headers, json=payload)
     r.raise_for_status()
 
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{path}"
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{output_file}"
     print(f"Uploaded to GitHub: {raw_url}")
     return raw_url
 
@@ -211,9 +244,8 @@ def main():
 
     print(f"Poem fetched: {poem['poet']} — {poem['lines'][0][:30]}...")
 
-    generate_image(poem["lines"], poem["poet"])
-
-    image_url = upload_to_github()
+    output_file = generate_image(poem["lines"], poem["poet"])
+    image_url   = upload_to_github(output_file)
     time.sleep(10)
 
     caption = "\n".join(poem["lines"]) + f"\n\n— {poem['poet']}"
