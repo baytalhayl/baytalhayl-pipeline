@@ -11,12 +11,13 @@ from PIL import Image
 from datetime import date
 import io
 import base64
+import time
 
 # ── Config ────────────────────────────────────────────────────────────────────
 INSTAGRAM_USER_ID  = os.environ["INSTAGRAM_USER_ID"]
 INSTAGRAM_TOKEN    = os.environ["INSTAGRAM_ACCESS_TOKEN"]
 GITHUB_TOKEN       = os.environ["GITHUB_TOKEN"]
-GITHUB_REPO        = os.environ["GITHUB_REPO"]          # e.g. "baytalhayl/baytalhayl-pipeline"
+GITHUB_REPO        = os.environ["GITHUB_REPO"]
 GRAPH_API_VERSION  = "v25.0"
 
 QUEUE_FILE    = "queue.json"
@@ -57,7 +58,7 @@ def save_queue(queue):
 def already_posted(queue, poem_id):
     return any(p["id"] == poem_id for p in queue)
 
-# ── Step 2: Pick random poem from local dataset ───────────────────────────────
+# ── Step 2: Pick random poem from dataset ─────────────────────────────────────
 def fetch_poem():
     with open("aldiwan_poems.json", "r", encoding="utf-8") as f:
         poems = json.load(f)
@@ -142,14 +143,10 @@ def upload_to_github():
     api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 
-    # Check if file already exists (need SHA to update)
     r = requests.get(api_url, headers=headers)
     sha = r.json().get("sha") if r.status_code == 200 else None
 
-    payload = {
-        "message": f"post: {date.today()}",
-        "content": content,
-    }
+    payload = {"message": f"post: {date.today()}", "content": content}
     if sha:
         payload["sha"] = sha
 
@@ -161,14 +158,9 @@ def upload_to_github():
     return raw_url
 
 # ── Step 5: Post to Instagram ─────────────────────────────────────────────────
- queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
-    save_queue(queue)
-    commit_queue(queue)
-
 def post_to_instagram(image_url, caption):
     base = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{INSTAGRAM_USER_ID}"
 
-    # Create container
     r = requests.post(f"{base}/media", data={
         "image_url": image_url,
         "caption":   caption,
@@ -178,7 +170,6 @@ def post_to_instagram(image_url, caption):
     r.raise_for_status()
     container_id = r.json()["id"]
 
-    # Publish
     r = requests.post(f"{base}/media_publish", data={
         "creation_id":  container_id,
         "access_token": INSTAGRAM_TOKEN,
@@ -211,7 +202,6 @@ def main():
     queue = load_queue()
     print(f"Queue has {len(queue)} entries.")
 
-    # Fetch a poem not already posted
     for _ in range(20):
         poem = fetch_poem()
         if not already_posted(queue, poem["id"]):
@@ -221,26 +211,18 @@ def main():
 
     print(f"Poem fetched: {poem['poet']} — {poem['lines'][0][:30]}...")
 
-    # Generate image
     generate_image(poem["lines"], poem["poet"])
 
-    # Upload to GitHub
     image_url = upload_to_github()
-    import time
     time.sleep(10)
-    # Build caption — poem lines + poet name
+
     caption = "\n".join(poem["lines"]) + f"\n\n— {poem['poet']}"
 
-    # Post to Instagram
-    post_to_instagram(image_url, caption)
-
-    # Update queue
-   # Update queue before posting so we never repeat even if posting fails
+    # Mark as posted before posting so duplicates never happen
     queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
     save_queue(queue)
     commit_queue(queue)
 
-    # Post to Instagram
     post_to_instagram(image_url, caption)
 
     print("Done!")
