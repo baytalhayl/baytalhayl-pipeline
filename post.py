@@ -250,7 +250,7 @@ def main():
 
     output_file = generate_image(poem["lines"], poem["poet"])
     image_url   = upload_to_github(output_file)
-    time.sleep(10)
+    time.sleep(30)
 
     caption = "\n".join(poem["lines"]) + f"\n\n— {poem['poet']}"
 
