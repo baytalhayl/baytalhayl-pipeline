@@ -74,7 +74,7 @@ def already_posted(queue, poem_id):
 
 # ── Step 2: Pick random poem from dataset ─────────────────────────────────────
 def fetch_poem():
-    with open("aldiwan_poems.json", "r", encoding="utf-8") as f:
+    with open("custom_poems.json", "r", encoding="utf-8") as f:
         poems = json.load(f)
 
     random.shuffle(poems)
