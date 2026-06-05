@@ -207,6 +207,22 @@ def post_to_instagram(image_url, caption):
     r.raise_for_status()
     container_id = r.json()["id"]
 
+    # Poll until container is ready
+    for attempt in range(10):
+        time.sleep(10)
+        status_r = requests.get(
+            f"https://graph.facebook.com/{GRAPH_API_VERSION}/{container_id}",
+            params={"fields": "status_code", "access_token": INSTAGRAM_TOKEN}
+        )
+        status = status_r.json().get("status_code", "")
+        print(f"Container status: {status}")
+        if status == "FINISHED":
+            break
+        elif status == "ERROR":
+            raise RuntimeError("Instagram container processing failed.")
+    else:
+        raise RuntimeError("Container never became ready after 100 seconds.")
+
     r = requests.post(f"{base}/media_publish", data={
         "creation_id":  container_id,
         "access_token": INSTAGRAM_TOKEN,
