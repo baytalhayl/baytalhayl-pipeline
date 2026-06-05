@@ -142,8 +142,8 @@ def generate_image(lines, poet):
 
     for i, (right_h, left_h) in enumerate(couplets):
         y = start_y + i * (row_height + GAP)
-        draw_hemistich(ctx, right_h, font_desc, y, MARGIN, half_w, row_height)
-        draw_hemistich(ctx, left_h, font_desc, y, mid_x, half_w, row_height)
+        draw_hemistich(ctx, left_h, font_desc, y, MARGIN, half_w, row_height)
+        draw_hemistich(ctx, right_h, font_desc, y, mid_x, half_w, row_height)
 
     # Symmetrical divider
     div_y = start_y + n_couplets * (row_height + GAP) + 10
