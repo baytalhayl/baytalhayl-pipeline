@@ -18,6 +18,8 @@ INSTAGRAM_USER_ID  = os.environ["INSTAGRAM_USER_ID"]
 INSTAGRAM_TOKEN    = os.environ["INSTAGRAM_ACCESS_TOKEN"]
 GITHUB_TOKEN       = os.environ["GITHUB_TOKEN"]
 GITHUB_REPO        = os.environ["GITHUB_REPO"]
+TELEGRAM_TOKEN     = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 GRAPH_API_VERSION  = "v25.0"
 
 QUEUE_FILE    = "queue.json"
@@ -72,8 +74,8 @@ def save_queue(queue):
 def already_posted(queue, poem_id):
     return any(p["id"] == poem_id for p in queue)
 
-# ── Step 2: Pick random poem from dataset ─────────────────────────────────────
-def fetch_poem():
+# ── Step 2: Pick random poem ──────────────────────────────────────────────────
+def fetch_poem(queue):
     with open("custom_poems.json", "r", encoding="utf-8") as f:
         poems = json.load(f)
 
@@ -96,9 +98,10 @@ def fetch_poem():
             start = max(0, start - 1)
         lines = verses[start:start + n]
 
-        return {"id": poem_id, "poet": poet, "lines": lines}
+        if not already_posted(queue, poem_id):
+            return {"id": poem_id, "poet": poet, "lines": lines}
 
-    raise RuntimeError("No valid poems found in dataset.")
+    raise RuntimeError("No valid unposted poems found.")
 
 # ── Step 3: Generate image ────────────────────────────────────────────────────
 def generate_image(lines, poet):
@@ -122,7 +125,6 @@ def generate_image(lines, poet):
     half_w = (SIZE - 2 * MARGIN) // 2
     mid_x  = SIZE // 2
 
-    # Auto-fit font size so no hemistich wraps
     font_size = 44
     while font_size >= 24:
         font_desc = f"Scheherazade {font_size}"
@@ -145,7 +147,6 @@ def generate_image(lines, poet):
         draw_hemistich(ctx, left_h, font_desc, y, MARGIN, half_w, row_height)
         draw_hemistich(ctx, right_h, font_desc, y, mid_x, half_w, row_height)
 
-    # Symmetrical divider
     div_y = start_y + n_couplets * (row_height + GAP) + 10
     LINE_START = 200
     LINE_END   = 390
@@ -157,7 +158,6 @@ def generate_image(lines, poet):
     ctx.move_to(LINE_START, div_y - 3); ctx.line_to(LINE_END, div_y - 3); ctx.stroke()
     ctx.move_to(SIZE - LINE_END, div_y - 3); ctx.line_to(SIZE - LINE_START, div_y - 3); ctx.stroke()
 
-    # Poet name
     layout = PangoCairo.create_layout(ctx)
     layout.set_text(f"— {poet}", -1)
     layout.set_font_description(Pango.FontDescription("Scheherazade 36"))
@@ -172,7 +172,57 @@ def generate_image(lines, poet):
     print(f"Image generated: {output_file}")
     return output_file
 
-# ── Step 4: Upload image to GitHub ────────────────────────────────────────────
+# ── Step 4: Telegram approval ─────────────────────────────────────────────────
+def send_telegram(output_file, lines, poet):
+    """Send image to Telegram with Post / Redo / Cancel buttons. Returns 'post', 'redo', or 'cancel'."""
+    base = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+
+    # Send photo with inline keyboard
+    caption = "\n".join(lines) + f"\n\n— {poet}"
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ Post",   "callback_data": "post"},
+            {"text": "🔄 Redo",  "callback_data": "redo"},
+            {"text": "❌ Cancel", "callback_data": "cancel"}
+        ]]
+    }
+
+    with open(output_file, "rb") as f:
+        r = requests.post(f"{base}/sendPhoto", data={
+            "chat_id":      TELEGRAM_CHAT_ID,
+            "caption":      caption,
+            "reply_markup": json.dumps(keyboard)
+        }, files={"photo": f})
+    r.raise_for_status()
+    message_id = r.json()["result"]["message_id"]
+    print(f"Sent to Telegram, message_id={message_id}")
+
+    # Clear old updates first
+    requests.get(f"{base}/getUpdates", params={"offset": -1, "limit": 1})
+    offset = None
+
+    # Poll for callback
+    print("Waiting for Telegram response...")
+    for _ in range(360):  # poll for up to 1 hour (360 x 10s)
+        time.sleep(10)
+        params = {"timeout": 8, "allowed_updates": ["callback_query"]}
+        if offset:
+            params["offset"] = offset
+        resp = requests.get(f"{base}/getUpdates", params=params).json()
+
+        for update in resp.get("result", []):
+            offset = update["update_id"] + 1
+            cb = update.get("callback_query")
+            if cb and str(cb["message"]["chat"]["id"]) == str(TELEGRAM_CHAT_ID):
+                action = cb["data"]
+                # Answer callback to remove loading spinner
+                requests.post(f"{base}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
+                print(f"Telegram response: {action}")
+                return action
+
+    return "cancel"  # timed out
+
+# ── Step 5: Upload image to GitHub ────────────────────────────────────────────
 def upload_to_github(output_file):
     with open(output_file, "rb") as f:
         content = base64.b64encode(f.read()).decode()
@@ -194,7 +244,7 @@ def upload_to_github(output_file):
     print(f"Uploaded to GitHub: {raw_url}")
     return raw_url
 
-# ── Step 5: Post to Instagram ─────────────────────────────────────────────────
+# ── Step 6: Post to Instagram ─────────────────────────────────────────────────
 def post_to_instagram(image_url, caption):
     base = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{INSTAGRAM_USER_ID}"
 
@@ -207,7 +257,6 @@ def post_to_instagram(image_url, caption):
     r.raise_for_status()
     container_id = r.json()["id"]
 
-    # Poll until container is ready
     for attempt in range(10):
         time.sleep(10)
         status_r = requests.get(
@@ -220,8 +269,6 @@ def post_to_instagram(image_url, caption):
             break
         elif status == "ERROR":
             raise RuntimeError("Instagram container processing failed.")
-    else:
-        raise RuntimeError("Container never became ready after 100 seconds.")
 
     r = requests.post(f"{base}/media_publish", data={
         "creation_id":  container_id,
@@ -233,7 +280,7 @@ def post_to_instagram(image_url, caption):
     print(f"Posted to Instagram: {post_id}")
     return post_id
 
-# ── Step 6: Update queue and commit ──────────────────────────────────────────
+# ── Step 7: Update queue and commit ──────────────────────────────────────────
 def commit_queue(queue):
     content  = base64.b64encode(json.dumps(queue, ensure_ascii=False, indent=2).encode()).decode()
     api_url  = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{QUEUE_FILE}"
@@ -255,28 +302,37 @@ def main():
     queue = load_queue()
     print(f"Queue has {len(queue)} entries.")
 
-    for _ in range(20):
-        poem = fetch_poem()
-        if not already_posted(queue, poem["id"]):
-            break
-    else:
-        raise RuntimeError("Could not find an unposted poem after 20 attempts.")
+    while True:
+        poem = fetch_poem(queue)
+        print(f"Poem fetched: {poem['poet']} — {poem['lines'][0][:30]}...")
 
-    print(f"Poem fetched: {poem['poet']} — {poem['lines'][0][:30]}...")
+        output_file = generate_image(poem["lines"], poem["poet"])
 
-    output_file = generate_image(poem["lines"], poem["poet"])
-    image_url   = upload_to_github(output_file)
-    time.sleep(30)
+        action = send_telegram(output_file, poem["lines"], poem["poet"])
 
-    caption = "\n".join(poem["lines"]) + f"\n\n— {poem['poet']}"
+        if action == "cancel":
+            print("Cancelled. No post today.")
+            return
 
-    queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
-    save_queue(queue)
-    commit_queue(queue)
+        if action == "redo":
+            print("Redoing with a new poem...")
+            # Mark as used so we don't pick it again this session
+            queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": f"skipped_{date.today()}"})
+            continue
 
-    post_to_instagram(image_url, caption)
+        # action == "post"
+        image_url = upload_to_github(output_file)
+        time.sleep(10)
 
-    print("Done!")
+        caption = "\n".join(poem["lines"]) + f"\n\n— {poem['poet']}"
+
+        queue.append({"id": poem["id"], "poet": poem["poet"], "posted_at": str(date.today())})
+        save_queue(queue)
+        commit_queue(queue)
+
+        post_to_instagram(image_url, caption)
+        print("Done!")
+        return
 
 if __name__ == "__main__":
     main()
