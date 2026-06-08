@@ -187,6 +187,8 @@ def send_telegram(output_file, lines, poet):
         ]]
     }
 
+    import os
+    print(f"Sending file: {output_file}, exists: {os.path.exists(output_file)}, cwd: {os.getcwd()}")
     with open(output_file, "rb") as f:
         r = requests.post(f"{base}/sendPhoto", data={
             "chat_id":      TELEGRAM_CHAT_ID,
