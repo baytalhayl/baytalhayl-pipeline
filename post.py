@@ -195,6 +195,7 @@ def send_telegram(output_file, lines, poet):
             "caption":      caption,
             "reply_markup": json.dumps(keyboard)
         }, files={"photo": f})
+    print(f"Telegram sendPhoto response: {r.status_code} {r.text}")
     r.raise_for_status()
     message_id = r.json()["result"]["message_id"]
     print(f"Sent to Telegram, message_id={message_id}")
